@@ -1,0 +1,52 @@
+name: example-app
+
+services:
+  app:
+    image: ghcr.io/YOUR_USER/example-app:latest
+    container_name: example-app
+    restart: unless-stopped
+    env_file: .env
+    # If your app expects different variable names than what's in Infisical,
+    # you can map them here. The .env provides the base values.
+    # environment:
+    #   DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
+    #   DATABASE_USER: ${POSTGRES_USER}
+    #   DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.routers.example-app.rule=Host(`app.example.com`)
+      - traefik.http.routers.example-app.entrypoints=websecure
+      - traefik.http.routers.example-app.tls=true
+      - traefik.http.routers.example-app.tls.certresolver=le
+      - traefik.http.services.example-app.loadbalancer.server.port=8080
+    networks:
+      - web
+      - internal
+
+  db:
+    image: postgres:16-alpine
+    container_name: example-app-db
+    restart: unless-stopped
+    env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - internal
+
+volumes:
+  pgdata:
+
+networks:
+  web:
+    external: true
+  internal:
+    internal: true

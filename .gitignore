@@ -1,0 +1,12 @@
+# Environment files contain secrets — never commit them
+services/**/.env
+.env
+*.env
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

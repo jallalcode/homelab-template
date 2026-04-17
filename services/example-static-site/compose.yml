@@ -1,0 +1,21 @@
+name: example-static-site
+
+services:
+  app:
+    image: nginx:alpine
+    container_name: example-static-site
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.routers.example-static.rule=Host(`site.example.com`)
+      - traefik.http.routers.example-static.entrypoints=websecure
+      - traefik.http.routers.example-static.tls=true
+      - traefik.http.routers.example-static.tls.certresolver=le
+      - traefik.http.services.example-static.loadbalancer.server.port=80
+    networks:
+      - web
+
+networks:
+  web:
+    external: true

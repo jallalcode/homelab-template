@@ -1,0 +1,114 @@
+name: Deploy Infra Services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      # Add your infra service paths here:
+      - 'services/example-static-site/**'
+      # - 'services/traefik/**'
+      # - 'services/dozzle/**'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service name to deploy"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  detect-changes:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changed.outputs.services }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed services
+        id: changed
+        run: |
+          SERVICES=()
+          for dir in $(git diff --name-only HEAD~1 HEAD | grep '^services/' | cut -d'/' -f2 | sort -u); do
+            # Skip services that deploy via their own repo (add yours here)
+            case "$dir" in
+              example-app) continue ;;
+            esac
+            if [ -f "services/$dir/compose.yml" ]; then
+              SERVICES+=("$dir")
+            fi
+          done
+
+          JSON=$(printf '%s\n' "${SERVICES[@]}" | jq -R . | jq -sc .)
+          echo "services=$JSON" >> "$GITHUB_OUTPUT"
+          echo "Will deploy: $JSON"
+
+  deploy-changed:
+    if: github.event_name == 'push' && needs.detect-changes.outputs.services != '[]'
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+      max-parallel: 1
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve project ID
+        id: svc
+        run: |
+          PROJECT_ID=$(jq -re --arg s "${{ matrix.service }}" 'if has($s) then .[$s] else error("Unknown service: \($s)") end' infisical-projects.json)
+          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy ${{ matrix.service }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: SERVICE,PROJECT_ID,INFISICAL_CLIENT_ID,INFISICAL_CLIENT_SECRET
+          script: |
+            cd /opt/homelab
+            git pull --ff-only
+            bash scripts/deploy.sh "$SERVICE" "$PROJECT_ID"
+        env:
+          SERVICE: ${{ matrix.service }}
+          PROJECT_ID: ${{ steps.svc.outputs.project_id }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+
+  deploy-manual:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve project ID
+        id: svc
+        run: |
+          PROJECT_ID=$(jq -re --arg s "${{ inputs.service }}" 'if has($s) then .[$s] else error("Unknown service: \($s)") end' infisical-projects.json)
+          echo "project_id=$PROJECT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy ${{ inputs.service }}
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: SERVICE,PROJECT_ID,INFISICAL_CLIENT_ID,INFISICAL_CLIENT_SECRET
+          script: |
+            cd /opt/homelab
+            git pull --ff-only
+            bash scripts/deploy.sh "$SERVICE" "$PROJECT_ID"
+        env:
+          SERVICE: ${{ inputs.service }}
+          PROJECT_ID: ${{ steps.svc.outputs.project_id }}
+          INFISICAL_CLIENT_ID: ${{ secrets.INFISICAL_CLIENT_ID }}
+          INFISICAL_CLIENT_SECRET: ${{ secrets.INFISICAL_CLIENT_SECRET }}
